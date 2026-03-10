@@ -1,0 +1,437 @@
+"""
+Enhanced Geometry Solver using SymPy + Shapely
+Plug this into your rag/ folder as rag/geometry_solver.py
+
+FREE tools used:
+- SymPy: Symbolic geometry calculations
+- Shapely: Geometric operations
+- NumPy: Already have it
+- Matplotlib: Already have it
+"""
+
+import logging
+import numpy as np
+from typing import List, Tuple, Dict, Any
+
+try:
+    from sympy import Point as SympyPoint, Triangle as SympyTriangle
+    from sympy import Circle as SympyCircle, Line as SympyLine
+    from sympy import pi, sqrt, atan2, Rational
+    SYMPY_AVAILABLE = True
+except ImportError:
+    SYMPY_AVAILABLE = False
+    logging.warning("SymPy not installed - symbolic geometry disabled")
+
+try:
+    from shapely.geometry import Point, Polygon, LineString, MultiPoint
+    from shapely.ops import unary_union
+    SHAPELY_AVAILABLE = True
+except ImportError:
+    SHAPELY_AVAILABLE = False
+    logging.warning("Shapely not installed - advanced geometry ops disabled")
+
+logger = logging.getLogger(__name__)
+
+
+class EnhancedGeometrySolver:
+    """
+    Combines SymPy (symbolic exact math) + Shapely (geometric operations)
+    for comprehensive geometry problem solving.
+    """
+    
+    def __init__(self):
+        self.use_sympy = SYMPY_AVAILABLE
+        self.use_shapely = SHAPELY_AVAILABLE
+    
+    # ─────────────────────────────────────────────────────────────────────
+    #  Triangle Solver (SymPy-powered)
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def solve_triangle(self, vertices: List[Tuple[str, float, float]]) -> Dict[str, Any]:
+        """
+        Solve triangle completely using SymPy.
+        
+        Args:
+            vertices: [("A", x1, y1), ("B", x2, y2), ("C", x3, y3)]
+        
+        Returns:
+            {
+                "area": float,
+                "perimeter": float,
+                "centroid": (x, y),
+                "is_right": bool,
+                "is_equilateral": bool,
+                "is_isosceles": bool,
+                "angles_deg": [float, float, float],
+                "sides": [float, float, float],
+                "side_names": ["AB", "BC", "CA"],
+                "area_exact": str,     # e.g. "6" or "sqrt(3)/4"
+                "formulas_used": []
+            }
+        """
+        if not self.use_sympy:
+            return self._solve_triangle_numpy(vertices)
+        
+        try:
+            # Create SymPy triangle
+            names = [v[0] for v in vertices]
+            points = [SympyPoint(v[1], v[2]) for v in vertices]
+            tri = SympyTriangle(*points)
+            
+            # Get exact symbolic results
+            area_exact = tri.area
+            perimeter_exact = tri.perimeter
+            centroid_exact = tri.centroid
+            
+            # Side lengths (exact)
+            sides_exact = [tri.sides[i].length for i in range(3)]
+            
+            # Angles (exact radians)
+            angles_rad = list(tri.angles.values())
+            
+            result = {
+                # Numeric conversions
+                "area": float(area_exact.evalf()),
+                "perimeter": float(perimeter_exact.evalf()),
+                "centroid": (float(centroid_exact.x), float(centroid_exact.y)),
+                "sides": [float(s.evalf()) for s in sides_exact],
+                "angles_deg": [float((a * 180 / pi).evalf()) for a in angles_rad],
+                
+                # Exact symbolic forms
+                "area_exact": str(area_exact),
+                "perimeter_exact": str(perimeter_exact),
+                "sides_exact": [str(s) for s in sides_exact],
+                
+                # Classification
+                "is_right": tri.is_right(),
+                "is_equilateral": tri.is_equilateral(),
+                "is_isosceles": tri.is_isosceles(),
+                "is_scalene": tri.is_scalene(),
+                
+                # Labels
+                "side_names": [f"{names[i]}{names[(i+1)%3]}" for i in range(3)],
+                "vertex_names": names,
+                
+                # Formulas used
+                "formulas_used": [
+                    "Area = 1/2 |x1(y2-y3) + x2(y3-y1) + x3(y1-y2)|",
+                    "Distance = √[(x2-x1)² + (y2-y1)²]"
+                ]
+            }
+            
+            # Add Pythagorean check if right triangle
+            if tri.is_right():
+                sides_sorted = sorted([float(s.evalf()) for s in sides_exact])
+                a, b, c = sides_sorted
+                result["pythagorean_check"] = f"{a}² + {b}² = {c}² ({a**2:.2f} + {b**2:.2f} = {c**2:.2f})"
+            
+            logger.info(f"[GeometrySolver] Solved triangle: {result['is_right'] and 'right' or result['is_equilateral'] and 'equilateral' or result['is_isosceles'] and 'isosceles' or 'scalene'}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"[GeometrySolver] SymPy triangle error: {e}")
+            return self._solve_triangle_numpy(vertices)
+    
+    def _solve_triangle_numpy(self, vertices: List[Tuple[str, float, float]]) -> Dict[str, Any]:
+        """Fallback numpy-based triangle solver"""
+        names = [v[0] for v in vertices]
+        coords = np.array([[v[1], v[2]] for v in vertices])
+        
+        # Side lengths using numpy
+        sides = []
+        for i in range(3):
+            p1 = coords[i]
+            p2 = coords[(i + 1) % 3]
+            dist = np.linalg.norm(p2 - p1)
+            sides.append(dist)
+        
+        # Area using Shoelace formula
+        area = 0.5 * abs(
+            coords[0][0] * (coords[1][1] - coords[2][1]) +
+            coords[1][0] * (coords[2][1] - coords[0][1]) +
+            coords[2][0] * (coords[0][1] - coords[1][1])
+        )
+        
+        # Centroid
+        centroid = coords.mean(axis=0)
+        
+        # Classification
+        s_sorted = sorted(sides)
+        is_equilateral = np.allclose(s_sorted[0], s_sorted[2], rtol=0.01)
+        is_isosceles = (np.allclose(s_sorted[0], s_sorted[1], rtol=0.01) or
+                        np.allclose(s_sorted[1], s_sorted[2], rtol=0.01))
+        is_right = np.allclose(s_sorted[0]**2 + s_sorted[1]**2, s_sorted[2]**2, rtol=0.01)
+        
+        # Angles using law of cosines
+        angles = []
+        for i in range(3):
+            # Angle at vertex i
+            a, b, c = sides[(i+2)%3], sides[i], sides[(i+1)%3]
+            cos_angle = (a**2 + b**2 - c**2) / (2 * a * b + 1e-10)
+            cos_angle = np.clip(cos_angle, -1, 1)
+            angle_rad = np.arccos(cos_angle)
+            angles.append(np.degrees(angle_rad))
+        
+        return {
+            "area": area,
+            "perimeter": sum(sides),
+            "centroid": tuple(centroid),
+            "sides": sides,
+            "angles_deg": angles,
+            "is_right": is_right,
+            "is_equilateral": is_equilateral,
+            "is_isosceles": is_isosceles,
+            "is_scalene": not (is_equilateral or is_isosceles),
+            "side_names": [f"{names[i]}{names[(i+1)%3]}" for i in range(3)],
+            "vertex_names": names,
+            "area_exact": str(area),
+            "formulas_used": ["Shoelace formula", "Law of cosines"]
+        }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    #  Distance & Midpoint (SymPy-powered)
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def calculate_distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> Dict[str, Any]:
+        """Calculate distance between two points"""
+        if self.use_sympy:
+            sp1 = SympyPoint(p1[0], p1[1])
+            sp2 = SympyPoint(p2[0], p2[1])
+            dist_exact = sp1.distance(sp2)
+            
+            return {
+                "distance": float(dist_exact.evalf()),
+                "distance_exact": str(dist_exact),
+                "formula": f"√[({p2[0]}-{p1[0]})² + ({p2[1]}-{p1[1]})²]",
+                "simplified": str(dist_exact)
+            }
+        else:
+            dist = np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+            return {
+                "distance": dist,
+                "distance_exact": str(dist),
+                "formula": f"√[({p2[0]}-{p1[0]})² + ({p2[1]}-{p1[1]})²]"
+            }
+    
+    def calculate_midpoint(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> Dict[str, Any]:
+        """Calculate midpoint of two points"""
+        if self.use_sympy:
+            sp1 = SympyPoint(p1[0], p1[1])
+            sp2 = SympyPoint(p2[0], p2[1])
+            mid = sp1.midpoint(sp2)
+            
+            return {
+                "midpoint": (float(mid.x), float(mid.y)),
+                "midpoint_exact": f"({mid.x}, {mid.y})",
+                "formula": f"(({p1[0]}+{p2[0]})/2, ({p1[1]}+{p2[1]})/2)"
+            }
+        else:
+            mx = (p1[0] + p2[0]) / 2
+            my = (p1[1] + p2[1]) / 2
+            return {
+                "midpoint": (mx, my),
+                "formula": f"(({p1[0]}+{p2[0]})/2, ({p1[1]}+{p2[1]})/2)"
+            }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    #  Circle (SymPy-powered)
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def solve_circle(self, center: Tuple[float, float], radius: float) -> Dict[str, Any]:
+        """Solve all circle properties"""
+        if self.use_sympy:
+            c = SympyCircle(SympyPoint(center[0], center[1]), radius)
+            
+            return {
+                "radius": radius,
+                "diameter": float((2 * c.radius).evalf()),
+                "circumference": float(c.circumference.evalf()),
+                "area": float(c.area.evalf()),
+                "center": center,
+                
+                # Exact symbolic
+                "circumference_exact": str(c.circumference),  # e.g., "10*pi"
+                "area_exact": str(c.area),                    # e.g., "25*pi"
+                
+                "formulas_used": [
+                    "Circumference = 2πr",
+                    "Area = πr²"
+                ]
+            }
+        else:
+            return {
+                "radius": radius,
+                "diameter": 2 * radius,
+                "circumference": 2 * np.pi * radius,
+                "area": np.pi * radius ** 2,
+                "center": center,
+                "formulas_used": ["C = 2πr", "A = πr²"]
+            }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    #  Line Equations (SymPy-powered)
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def line_equation(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> Dict[str, Any]:
+        """Get line equation through two points"""
+        if self.use_sympy:
+            sp1 = SympyPoint(p1[0], p1[1])
+            sp2 = SympyPoint(p2[0], p2[1])
+            line = SympyLine(sp1, sp2)
+            
+            return {
+                "slope": float(line.slope) if line.slope.is_number else str(line.slope),
+                "slope_exact": str(line.slope),
+                "equation": str(line.equation()),
+                "y_intercept": float(line.equation().subs('x', 0).rhs) if line.slope.is_number else None,
+                "is_vertical": not line.slope.is_number,
+                "is_horizontal": line.slope == 0
+            }
+        else:
+            if p2[0] == p1[0]:  # Vertical line
+                return {
+                    "slope": "undefined",
+                    "equation": f"x = {p1[0]}",
+                    "is_vertical": True,
+                    "is_horizontal": False
+                }
+            else:
+                m = (p2[1] - p1[1]) / (p2[0] - p1[0])
+                b = p1[1] - m * p1[0]
+                return {
+                    "slope": m,
+                    "y_intercept": b,
+                    "equation": f"y = {m:.3f}x + {b:.3f}",
+                    "is_vertical": False,
+                    "is_horizontal": abs(m) < 1e-10
+                }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    #  Shapely Operations (if available)
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def check_collinear(self, points: List[Tuple[float, float]]) -> Dict[str, Any]:
+        """Check if points are collinear"""
+        if self.use_sympy:
+            sympy_pts = [SympyPoint(x, y) for x, y in points]
+            is_collinear = SympyPoint.is_collinear(*sympy_pts)
+            return {
+                "collinear": is_collinear,
+                "method": "SymPy determinant check"
+            }
+        else:
+            # Use cross product for 3 points
+            if len(points) != 3:
+                return {"collinear": None, "error": "Need exactly 3 points"}
+            
+            p1, p2, p3 = np.array(points)
+            # Vectors
+            v1 = p2 - p1
+            v2 = p3 - p1
+            # Cross product (in 2D, it's a scalar)
+            cross = v1[0] * v2[1] - v1[1] * v2[0]
+            
+            return {
+                "collinear": abs(cross) < 1e-10,
+                "method": "Cross product",
+                "cross_product": cross
+            }
+    
+    def polygon_contains_point(self, polygon_vertices: List[Tuple[float, float]], 
+                               point: Tuple[float, float]) -> bool:
+        """Check if a point is inside a polygon (Shapely)"""
+        if not self.use_shapely:
+            return None
+        
+        poly = Polygon(polygon_vertices)
+        pt = Point(point[0], point[1])
+        return poly.contains(pt)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Integration with your main.py
+# ─────────────────────────────────────────────────────────────────────────
+
+def enhance_geometry_answer(question: str, solution: str, vertices: List) -> Dict[str, Any]:
+    """
+    Use this in your answer pipeline to add rich geometry metadata.
+    
+    Call from generate_step_by_step_fallback or build_final_answer
+    """
+    solver = EnhancedGeometrySolver()
+    
+    enhanced = {
+        "geometry_solved": False,
+        "properties": {},
+        "formulas": []
+    }
+    
+    try:
+        if len(vertices) == 3:
+            # Triangle problem
+            tri_data = solver.solve_triangle(vertices)
+            enhanced["geometry_solved"] = True
+            enhanced["shape_type"] = "triangle"
+            enhanced["properties"] = tri_data
+            enhanced["formulas"] = tri_data.get("formulas_used", [])
+            
+        elif len(vertices) == 2:
+            # Distance/midpoint problem
+            p1 = (vertices[0][1], vertices[0][2])
+            p2 = (vertices[1][1], vertices[1][2])
+            
+            dist_data = solver.calculate_distance(p1, p2)
+            mid_data = solver.calculate_midpoint(p1, p2)
+            
+            enhanced["geometry_solved"] = True
+            enhanced["shape_type"] = "line_segment"
+            enhanced["properties"] = {**dist_data, **mid_data}
+        
+        # Check if question mentions circle
+        q_lower = question.lower()
+        if "circle" in q_lower or "radius" in q_lower:
+            # Try to extract radius
+            import re
+            r_match = re.search(r'radius\s*[=:of]*\s*(\d+(?:\.\d+)?)', q_lower)
+            if r_match:
+                radius = float(r_match.group(1))
+                # Center is usually origin unless specified
+                center = (0, 0)
+                circle_data = solver.solve_circle(center, radius)
+                enhanced["geometry_solved"] = True
+                enhanced["shape_type"] = "circle"
+                enhanced["properties"] = circle_data
+                enhanced["formulas"] = circle_data.get("formulas_used", [])
+    
+    except Exception as e:
+        logger.error(f"[EnhancedGeometry] Error: {e}")
+    
+    return enhanced
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Example Usage
+# ─────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    solver = EnhancedGeometrySolver()
+    
+    # Example 1: Triangle
+    vertices = [("A", 0, 0), ("B", 4, 0), ("C", 4, 3)]
+    result = solver.solve_triangle(vertices)
+    print("\n=== TRIANGLE ===")
+    print(f"Area: {result['area']} (exact: {result['area_exact']})")
+    print(f"Is right? {result['is_right']}")
+    print(f"Angles: {result['angles_deg']}")
+    
+    # Example 2: Distance
+    dist = solver.calculate_distance((1, 2), (4, 6))
+    print("\n=== DISTANCE ===")
+    print(f"Distance: {dist['distance']} (exact: {dist['distance_exact']})")
+    
+    # Example 3: Circle
+    circle = solver.solve_circle(center=(0, 0), radius=5)
+    print("\n=== CIRCLE ===")
+    print(f"Area: {circle['area']} (exact: {circle['area_exact']})")
+    print(f"Circumference: {circle['circumference']} (exact: {circle['circumference_exact']})")
